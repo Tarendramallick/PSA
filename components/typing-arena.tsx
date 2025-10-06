@@ -6,7 +6,6 @@ import type { JavaExample } from "@/lib/parse-notes"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -19,9 +18,8 @@ export function TypingArena() {
 
   const examples = data?.examples ?? []
   const [index, setIndex] = React.useState(0)
-  const [duration, setDuration] = React.useState<number>(60)
   const [startedAt, setStartedAt] = React.useState<number | null>(null)
-  const [remaining, setRemaining] = React.useState<number>(duration)
+  const [elapsed, setElapsed] = React.useState<number>(0)
   const [typed, setTyped] = React.useState<string>("")
   const [finished, setFinished] = React.useState<boolean>(false)
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
@@ -29,28 +27,23 @@ export function TypingArena() {
   const current = examples[index] as JavaExample | undefined
   const target = current?.code ?? ""
 
-  // Start timer on first keystroke
+  // Replace countdown effect with count-up effect
   React.useEffect(() => {
-    if (!startedAt) return
-    setRemaining(Math.max(0, duration - Math.floor((Date.now() - startedAt) / 1000)))
+    if (!startedAt || finished) return
+    setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
     const id = setInterval(() => {
-      const left = Math.max(0, duration - Math.floor((Date.now() - startedAt) / 1000))
-      setRemaining(left)
-      if (left <= 0) {
-        clearInterval(id)
-        setFinished(true)
-      }
+      setElapsed(Math.max(0, Math.floor((Date.now() - startedAt!) / 1000)))
     }, 250)
     return () => clearInterval(id)
-  }, [startedAt, duration])
+  }, [startedAt, finished])
 
-  // Reset when snippet changes
+  // Reset state on snippet change (remove remaining/duration) and reset elapsed
   React.useEffect(() => {
     setTyped("")
     setStartedAt(null)
-    setRemaining(duration)
+    setElapsed(0)
     setFinished(false)
-  }, [index, duration])
+  }, [index])
 
   // Ensure focus on mount
   React.useEffect(() => {
@@ -79,7 +72,7 @@ export function TypingArena() {
   }, [])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Allow Enter to advance only when current snippet is perfectly completed
+    // allow Enter to skip the 3s wait if already finished
     if (e.key === "Enter" && finished && typed === target) {
       e.preventDefault()
       nextSnippet()
@@ -88,93 +81,85 @@ export function TypingArena() {
 
     if (!current) return
 
-    // Start timer on first keystroke
-    if (!startedAt) {
-      setStartedAt(Date.now())
-    }
+    // start timer on first keystroke
+    if (!startedAt) setStartedAt(Date.now())
 
-    // If timer finished, do not accept more input unless it was a perfect finish
-    if (finished && typed !== target) {
+    if (finished) {
+      // when finished, ignore additional typing (except Enter above)
       e.preventDefault()
       return
     }
 
     if (e.key === "Backspace") {
       e.preventDefault()
-      setTyped((prev) => {
-        const next = prev.slice(0, -1)
-        if (finished) setFinished(false)
-        return next
-      })
+      setTyped((prev) => prev.slice(0, -1))
       return
     }
 
-    const tryType = (str: string) => {
-      setTyped((prev) => {
-        const idx = prev.length
-        const expected = target.slice(idx, idx + str.length)
-        if (expected !== str) {
-          // do not advance if wrong character (including whitespace)
-          return prev
-        }
-        let next = prev + str
-
-        if (str === "\n") {
-          while (next.length < target.length) {
-            const ch = target[next.length]
-            if (ch === " " || ch === "\t") {
-              next += ch
-              continue
-            }
-            break
-          }
-        }
-
-        const isPerfect = next === target
-        if (isPerfect) {
-          setFinished(true)
-          setTimeout(() => {
-            if (next === target) nextSnippet()
-          }, 400)
-        } else if (finished) {
-          setFinished(false)
-        }
-        return next
-      })
+    // prevent typing beyond target length
+    const at = typed.length
+    if (at >= target.length && e.key !== "Backspace") {
+      e.preventDefault()
+      return
     }
 
-    // Printable single character
+    // printable characters
     if (e.key.length === 1) {
       e.preventDefault()
-      tryType(e.key)
+      setTyped((prev) => {
+        const next = prev + e.key
+        // check perfect completion (exact match only)
+        if (next === target) {
+          setFinished(true)
+          // auto-advance after 3 seconds
+          setTimeout(() => nextSnippet(), 3000)
+        }
+        return next
+      })
       return
     }
 
-    // Enter inserts a newline (strict) and auto-skips indentation
+    // Enter inserts newline; only auto-skip indentation if it matches the target at caret
     if (e.key === "Enter") {
       e.preventDefault()
-      tryType("\n")
+      setTyped((prev) => {
+        let next = prev
+        const idx = prev.length
+        const expected = target[idx]
+        // insert newline regardless to keep “accept wrong keystrokes” behavior
+        next += "\n"
+        if (expected === "\n") {
+          let j = idx + 1
+          while (j < target.length && (target[j] === " " || target[j] === "\t")) {
+            next += target[j]
+            j++
+          }
+        }
+        if (next.length > target.length) next = next.slice(0, target.length)
+        if (next === target) {
+          setFinished(true)
+          setTimeout(() => nextSnippet(), 3000)
+        }
+        return next
+      })
       return
     }
 
+    // Tab inserts a tab character
     if (e.key === "Tab") {
       e.preventDefault()
-      tryType("\t")
+      setTyped((prev) => {
+        let next = prev + "\t"
+        if (next.length > target.length) next = next.slice(0, target.length)
+        if (next === target) {
+          setFinished(true)
+          setTimeout(() => nextSnippet(), 3000)
+        }
+        return next
+      })
       return
     }
   }
-
-  const correctCount = React.useMemo(() => {
-    let c = 0
-    for (let i = 0; i < typed.length; i++) {
-      if (typed[i] === target[i]) c++
-    }
-    return c
-  }, [typed, target])
-
-  const accuracy = typed.length === 0 ? 100 : Math.round((correctCount / typed.length) * 100)
-  const elapsedSec = startedAt ? Math.max(1, Math.floor((Date.now() - startedAt) / 1000)) : 0
-  const wpm = startedAt ? Math.round(correctCount / 5 / (elapsedSec / 60)) : 0
 
   const nextSnippet = () => {
     setIndex((i) => (examples.length ? (i + 1) % examples.length : 0))
@@ -191,9 +176,8 @@ export function TypingArena() {
   const restart = () => {
     setTyped("")
     setStartedAt(null)
-    setRemaining(duration)
+    setElapsed(0)
     setFinished(false)
-    // Refocus on restart
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -220,17 +204,6 @@ export function TypingArena() {
           <span className="text-xs text-muted-foreground">{current.filename}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={`${duration}`} onValueChange={(v) => setDuration(Number.parseInt(v))}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="Timer" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="15">15s</SelectItem>
-              <SelectItem value="30">30s</SelectItem>
-              <SelectItem value="60">60s</SelectItem>
-              <SelectItem value="120">120s</SelectItem>
-            </SelectContent>
-          </Select>
           <Button size="sm" variant="outline" onClick={prevSnippet}>
             Prev
           </Button>
@@ -280,9 +253,10 @@ export function TypingArena() {
             />
           </div>
 
-          <div className="mt-3 text-lg font-mono">
-            <span className="text-primary">{remaining}</span>
-            <span className="text-muted-foreground">s</span>
+          <div className="mt-3 font-mono">
+            <span className="text-primary text-lg">{elapsed}</span>
+            <span className="text-muted-foreground text-lg">s</span>
+            {finished ? <span className="ml-3 text-muted-foreground text-sm">Next in 3s…</span> : null}
           </div>
 
           <div className="mt-4 flex items-center justify-end">
@@ -342,13 +316,13 @@ function CodeOverlay({
       const isCorrect = isTyped ? typed[i] === ch : false
       const isCaret = i === typed.length && !finished
 
+      // Bump font size for readability
       chars.push(
         <span
           key={i}
           className={cn(
-            "font-mono text-lg leading-8 md:text-xl md:leading-9",
+            "font-mono text-xl leading-9 md:text-2xl md:leading-10",
             !isTyped && "text-muted-foreground/70",
-            // purple correct, red incorrect
             isTyped && (isCorrect ? "text-chart-4" : "text-destructive"),
             isCaret && "bg-primary/20 border-b-2 border-primary",
           )}
@@ -360,7 +334,7 @@ function CodeOverlay({
 
     // Caret at the line break (between lines)
     const caretAtLineBreak = typed.length === lineEnd && !finished
-    const afterLine = li < lines.length - 1 // there is a newline char in target
+    const afterLine = li < lines.length - 1 // there is a newline char in target except after last line
 
     blocks.push(
       <div
