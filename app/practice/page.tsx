@@ -1,3 +1,4 @@
+"use client"
 import useSWR from "swr"
 import TypingArenaV2 from "@/components/typing-arena-v2"
 
