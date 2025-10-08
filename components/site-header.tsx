@@ -3,6 +3,7 @@
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import * as React from "react"
+import Link from "next/link"
 
 export function SiteHeader() {
   const [open, setOpen] = React.useState(false)
@@ -19,6 +20,11 @@ export function SiteHeader() {
         <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
           About
         </Button>
+        <Link href="/practice-split">
+          <Button size="sm" className="ml-1">
+            Start Split Practice
+          </Button>
+        </Link>
       </div>
 
       {open ? (
